@@ -10,7 +10,7 @@ from utils import (
     FAISS_INDEX_PATH,
     CHUNK_META_PATH,
     CHUNK_VECTORS_PATH,
-    BM25S_INDEX_PATH,
+    BM25_PREFIX,
     ensure_artifacts_dir,
     load_corpus,
     timer,
@@ -24,8 +24,8 @@ def build_offline_index() -> None:
     from embed import embed_chunks
     from index import (
         build_faiss_index, save_faiss_index,
-        build_bm25s_index, save_bm25s_index,
-        save_chunk_meta, save_vectors,
+        build_bm25_index,  save_bm25_index,
+        save_chunk_meta,   save_vectors,
     )
 
     ensure_artifacts_dir()
@@ -48,9 +48,9 @@ def build_offline_index() -> None:
         faiss_index = build_faiss_index(vectors)
         save_faiss_index(faiss_index, FAISS_INDEX_PATH)
 
-    with timer("Building BM25S index"):
-        bm25s_index = build_bm25s_index(chunks)
-        save_bm25s_index(bm25s_index, BM25S_INDEX_PATH)
+    with timer("Building BM25 numpy index"):
+        bm25 = build_bm25_index(chunks)
+        save_bm25_index(bm25, BM25_PREFIX)
 
     print("\nAll artifacts saved. Ready to commit.")
 
@@ -66,19 +66,19 @@ def _ensure_loaded() -> None:
     if _loaded:
         return
     import os
-    missing = [p for p in [FAISS_INDEX_PATH, CHUNK_META_PATH, BM25S_INDEX_PATH]
+    missing = [p for p in [FAISS_INDEX_PATH, CHUNK_META_PATH, BM25_PREFIX + "_vocab.json"]
                if not os.path.exists(p)]
     if missing:
         raise RuntimeError(f"Missing artifacts: {missing}. Run python3 scripts/build_index.py first.")
     load_indexes(
         faiss_path  = FAISS_INDEX_PATH,
         meta_path   = CHUNK_META_PATH,
-        bm25s_path  = BM25S_INDEX_PATH,
+        bm25_prefix = BM25_PREFIX,
     )
     _loaded = True
 
 
-def run(queries: list[str]) -> list[list[int]]:
+def run(queries: list) -> list:
     """Return top-10 page IDs per query. Called by autograder."""
     _ensure_loaded()
     return retrieve_batch(queries)

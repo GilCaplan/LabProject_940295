@@ -22,7 +22,7 @@ ARTIFACTS_DIR      = Path("artifacts")
 FAISS_INDEX_PATH   = str(ARTIFACTS_DIR / "faiss.index")
 CHUNK_META_PATH    = str(ARTIFACTS_DIR / "chunk_meta.json")
 CHUNK_VECTORS_PATH = str(ARTIFACTS_DIR / "chunk_vectors.npy")
-BM25S_INDEX_PATH   = str(ARTIFACTS_DIR / "bm25s_index")
+BM25_PREFIX        = str(ARTIFACTS_DIR / "bm25")
 
 
 CORPUS_DIR         = Path("data") / "Wikipedia Entries"
@@ -111,7 +111,7 @@ def check_artifacts_present() -> bool:
     required = [
         FAISS_INDEX_PATH,
         CHUNK_META_PATH,
-        BM25S_INDEX_PATH,
+        BM25_PREFIX + "_vocab.json",
     ]
     missing = [p for p in required if not os.path.exists(p)]
     if missing:
