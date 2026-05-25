@@ -12,3 +12,4 @@ ProjectA_PartB/data/
 ProjectA_PartB/__pycache__/
 ProjectA_PartB/artifacts/*.npy
 ProjectA_PartB/artifacts/*.index
+ProjectA_PartB/artifacts/bm25_index.json
