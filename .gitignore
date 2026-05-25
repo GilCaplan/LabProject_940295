@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.zip
+*.log
+nohup.out
+.DS_Store
+.idea/
+.vscode/
+ProjectA_PartA/data/
+ProjectA_PartA/__pycache__/
+ProjectA_PartB/data/
+ProjectA_PartB/__pycache__/
+ProjectA_PartB/artifacts/*.npy
+ProjectA_PartB/artifacts/*.index

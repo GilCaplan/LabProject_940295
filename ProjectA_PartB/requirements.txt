@@ -1,0 +1,5 @@
+numpy>=1.24,<2
+sentence-transformers==2.7.0
+transformers==4.41.0
+faiss-gpu
+torch==2.1.2+cu121
