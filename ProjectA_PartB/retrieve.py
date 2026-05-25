@@ -1,80 +1,120 @@
 #!/usr/bin/env python3
 """
-retrieve.py — BM25S retrieval with query-time optimizations.
+retrieve.py — Fast BM25 retrieval with query decomposition.
 
-Query-time improvements (no reindex needed):
-  1. Snowball stemmer (PyStemmer) — "modernized" → "modern"
-  2. Aggressive stopword removal — removes question words and common words
-     that match every chunk equally
-  3. Token repetition boosting — repeat numbers and long words to increase
-     their BM25S weight (simulates field boosting)
-  4. Decade expansion — "1820s" → ["1820","1821",...,"1829"]
-  5. Year stream — separate BM25S search on year tokens only (high precision)
+Uses numpy CSR sparse BM25 (no scipy/bm25s) — compliant with import rules.
+Speed comes from numpy vectorized scoring instead of Python loops.
 
-Research basis:
-  - BM25S paper: stemmer + stopwords improves NDCG@10 from 38.4 → 39.7
-  - BM25 field boosting: title tokens 5x more important than body
-  - Query augmentation: token repetition boosts IDF weight at query time
+Key techniques:
+  - Query decomposition: "What links X, Y, Z" → 3 independent searches
+  - Year expansion: "1820s" → ["1820".."1829"]
+  - Porter stemmer (pure Python): "modernized" → "modern"
+  - Weighted RRF fusion
+  - Summary chunk 1.5x boost
 """
 
 import re
 from collections import defaultdict
 import numpy as np
 import faiss
-import bm25s
 
-BM25S_TOP_K = 200
+BM25_TOP_K  = 200
 RRF_K       = 60
 FINAL_TOP_N = 10
 BM25_WEIGHT = 8.0
 YEAR_WEIGHT = 4.0
 
-# Question words and stopwords to strip from BM25S query
-STOPWORDS = {
-    "who","what","where","when","which","whose","whom","how",
-    "was","is","are","were","be","been","has","have","had",
-    "the","a","an","of","in","on","at","to","for","with",
-    "by","from","that","this","it","its","and","or","but",
-    "did","do","does","their","there","about","during","after",
-    "before","between","into","through","over","under",
-}
 
 # ---------------------------------------------------------------------------
 # Singleton store
 # ---------------------------------------------------------------------------
 class _Store:
     faiss_index = None
-    bm25s_index = None
+    bm25_index  = None
     chunk_meta  = None
 
 _store = _Store()
 
 
-def load_indexes(faiss_path, meta_path, bm25s_path, **kwargs):
+def load_indexes(faiss_path, meta_path, bm25_prefix, **kwargs):
     if _store.faiss_index is not None:
         return
-    from index import load_faiss_index, load_chunk_meta, load_bm25s_index
+    from index import load_faiss_index, load_chunk_meta, load_bm25_index
     print("Loading indexes ...")
     _store.faiss_index = load_faiss_index(faiss_path)
     _store.chunk_meta  = load_chunk_meta(meta_path)
-    _store.bm25s_index = load_bm25s_index(bm25s_path)
+    _store.bm25_index  = load_bm25_index(bm25_prefix)
     print("Indexes loaded.")
 
 
 # ---------------------------------------------------------------------------
-# Stemmer (lazy loaded)
+# Porter stemmer (pure Python, no deps)
 # ---------------------------------------------------------------------------
-_stemmer = None
+class _PorterStemmer:
+    def __init__(self):
+        self._vowels = set("aeiou")
 
-def _get_stemmer():
-    global _stemmer
-    if _stemmer is None:
-        try:
-            import Stemmer
-            _stemmer = Stemmer.Stemmer("english")
-        except ImportError:
-            _stemmer = False  # unavailable
-    return _stemmer if _stemmer else None
+    def _cons(self, word, i):
+        if word[i] in self._vowels: return False
+        if word[i] == "y": return i == 0 or not self._cons(word, i - 1)
+        return True
+
+    def _m(self, word):
+        n, i, L = 0, 0, len(word)
+        while i < L and not self._cons(word, i): i += 1
+        while i < L:
+            while i < L and not self._cons(word, i): i += 1
+            while i < L and self._cons(word, i): i += 1
+            n += 1
+        return n
+
+    def _has_vowel(self, word):
+        return any(not self._cons(word, i) for i in range(len(word)))
+
+    def stem(self, word):
+        if len(word) <= 2: return word
+        w = word.lower()
+        if w.endswith("sses"): w = w[:-2]
+        elif w.endswith("ies"): w = w[:-2]
+        elif w.endswith("ss"): pass
+        elif w.endswith("s"): w = w[:-1]
+        if w.endswith("eed"):
+            if self._m(w[:-3]) > 0: w = w[:-1]
+        elif w.endswith("ed"):
+            s = w[:-2]
+            if self._has_vowel(s):
+                w = s
+                if w.endswith(("at","bl","iz")): w += "e"
+                elif len(w)>1 and self._cons(w,-1) and self._cons(w,-2) and w[-1]==w[-2] and w[-1] not in "lsz": w=w[:-1]
+        elif w.endswith("ing"):
+            s = w[:-3]
+            if self._has_vowel(s):
+                w = s
+                if w.endswith(("at","bl","iz")): w += "e"
+                elif len(w)>1 and self._cons(w,-1) and self._cons(w,-2) and w[-1]==w[-2] and w[-1] not in "lsz": w=w[:-1]
+        if w.endswith("y") and len(w)>1 and self._has_vowel(w[:-1]): w=w[:-1]+"i"
+        for suf,rep in [("ational","ate"),("tional","tion"),("enci","ence"),("anci","ance"),
+                        ("izer","ize"),("bli","ble"),("alli","al"),("entli","ent"),("eli","e"),
+                        ("ousli","ous"),("ization","ize"),("ation","ate"),("ator","ate"),
+                        ("alism","al"),("iveness","ive"),("fulness","ful"),("ousness","ous"),
+                        ("aliti","al"),("iviti","ive"),("biliti","ble")]:
+            if w.endswith(suf) and self._m(w[:-len(suf)])>0: w=w[:-len(suf)]+rep; break
+        for suf,rep in [("icate","ic"),("ative",""),("alize","al"),("iciti","ic"),("ical","ic"),("ful",""),("ness","")]:
+            if w.endswith(suf) and self._m(w[:-len(suf)])>0: w=w[:-len(suf)]+rep; break
+        for suf in ["al","ance","ence","er","ic","able","ible","ant","ement","ment","ent","ion","ou","ism","ate","iti","ous","ive","ize"]:
+            stem=w[:-len(suf)]
+            if w.endswith(suf) and self._m(stem)>1:
+                if suf=="ion" and stem and stem[-1] in "st": w=stem
+                elif suf!="ion": w=stem
+                break
+        if w.endswith("e"):
+            s=w[:-1]
+            if self._m(s)>1: w=s
+            elif self._m(s)==1: w=s
+        if len(w)>1 and w[-1]==w[-2]=="l" and self._cons(w,-1) and self._m(w)>1: w=w[:-1]
+        return w
+
+_stemmer = _PorterStemmer()
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +122,6 @@ def _get_stemmer():
 # ---------------------------------------------------------------------------
 
 def _expand_decades(t: str) -> list:
-    """'1820s' → ['1820','1821',...,'1829']"""
     m = re.match(r"(\d{3})0s", t)
     if m:
         base = int(m.group(1)) * 10
@@ -94,62 +133,52 @@ def _expand_decades(t: str) -> list:
     return [t]
 
 
-def _build_query_tokens(query: str) -> tuple[list, list]:
+def _tokenize_query(query: str) -> tuple:
     """
-    Build two token lists from query:
-      main_tokens: stopword-filtered, stemmed, with boosted repetitions
-      year_tokens: decade-expanded year tokens only
-
-    Token boosting (simulates BM25F field weighting):
-      - Numbers (years, stats): repeat 3x — very discriminative
-      - Long words (>6 chars, likely names/entities): repeat 2x
-      - Regular content words: appear once
+    Returns (main_tokens, year_tokens).
+    Main tokens are stemmed. Years are expanded from decades.
     """
     text = re.sub(r"[^a-z0-9\s]", " ", query.lower())
-    raw_tokens = text.split()
-
-    stemmer = _get_stemmer()
     main_tokens = []
     year_tokens = []
 
-    for t in raw_tokens:
-        # Expand decades
+    for t in text.split():
         expanded = _expand_decades(t)
-
-        if len(expanded) > 1 or (len(expanded) == 1 and re.match(r"\d{4}$", expanded[0])):
-            # Year tokens — add to year stream, also add to main with boost
+        if len(expanded) > 1 or (len(expanded)==1 and re.match(r"\d{4}$", expanded[0])):
             year_tokens.extend(expanded)
-            main_tokens.extend(expanded * 3)   # 3x boost for years
-        elif t in STOPWORDS:
-            pass  # skip
-        elif re.match(r"\d+", t):
-            # Other numbers — boost 3x
-            main_tokens.extend([t] * 3)
+            main_tokens.extend(expanded)
         else:
-            # Content word — stem and optionally boost
-            word = stemmer.stemWord(t) if stemmer else t
-            if len(t) > 6:
-                main_tokens.extend([word, word, t])  # 2x stemmed + original
-            else:
-                main_tokens.append(word)
+            stemmed = _stemmer.stem(t)
+            main_tokens.append(stemmed)
+            if stemmed != t:
+                main_tokens.append(t)
 
     return main_tokens, year_tokens
 
 
-def _bm25s_retrieve(tokens: list, k: int = 200) -> list:
-    """BM25S sparse retrieval — returns (chunk_id, score) list."""
-    if not tokens:
-        return []
-    stemmer = _get_stemmer()
-    tokenized = bm25s.tokenize(
-        [" ".join(tokens)],
-        stemmer=stemmer,
-        stopwords="en",
-        show_progress=False,
-    )
-    k = min(k, _store.bm25s_index.scores["data"].shape[0])
-    results, scores = _store.bm25s_index.retrieve(tokenized, k=k)
-    return [(int(results[0][i]), float(scores[0][i])) for i in range(len(results[0]))]
+def _decompose_query(query: str) -> list:
+    """Split multi-hop queries into sub-queries."""
+    q = query.strip()
+    m = re.match(r"(?:what links|how do|how does|what connects)\s+(.+)", q, re.IGNORECASE)
+    if m:
+        parts = re.split(r",\s+(?:and\s+)?|\s+and\s+", m.group(1))
+        parts = [p.strip().rstrip("?.,") for p in parts if len(p.strip()) > 5]
+        if len(parts) >= 2:
+            return parts
+    m = re.match(r"which .+ combines (.+?) with (.+)", q, re.IGNORECASE)
+    if m:
+        return [m.group(1).strip(), m.group(2).strip().rstrip("?.,")]
+    return [query]
+
+
+# ---------------------------------------------------------------------------
+# Retrieval helpers
+# ---------------------------------------------------------------------------
+
+def _bm25_retrieve(tokens: list, k: int = 200) -> list:
+    """Fast numpy CSR BM25 retrieval."""
+    from index import bm25_query
+    return bm25_query(_store.bm25_index, tokens, k=k)
 
 
 def _rrf_fuse(ranked_lists: list, weights: list = None) -> dict:
@@ -163,7 +192,6 @@ def _rrf_fuse(ranked_lists: list, weights: list = None) -> dict:
 
 
 def _to_pages(chunk_scores: dict) -> list:
-    """Max-pool chunk scores → page scores. Summary chunks get 1.5x boost."""
     meta = _store.chunk_meta
     page_scores = defaultdict(float)
     for cid, score in chunk_scores.items():
@@ -183,45 +211,41 @@ def _to_pages(chunk_scores: dict) -> list:
 
 def retrieve_batch(queries: list) -> list:
     """
-    Retrieve top-10 page IDs per query using BM25S with query decomposition.
-
-    For multi-hop queries ("What links X, Y, and Z"), decomposes into
-    sub-queries and searches each independently, then fuses results.
-    This ensures pages about X are not penalized by Y and Z terms.
+    Retrieve top-10 page IDs per query.
+    Multi-hop queries decomposed into sub-queries for better recall.
+    Fast numpy BM25 scoring — no Python loops over chunks.
     """
     all_page_results = []
     for query in queries:
-        sub_queries = _decompose_query(query)
-        is_multihop = len(sub_queries) > 1
-
-        all_lists   = []
-        all_weights = []
+        sub_queries  = _decompose_query(query)
+        is_multihop  = len(sub_queries) > 1
+        all_lists    = []
+        all_weights  = []
 
         if is_multihop:
-            # Search each sub-query independently
             for sub_q in sub_queries:
-                tokens = sub_q.lower().split()
-                hits = _bm25s_retrieve(tokens, k=BM25S_TOP_K)
+                tokens, _ = _tokenize_query(sub_q)
+                hits = _bm25_retrieve(tokens, k=BM25_TOP_K)
                 if hits:
                     all_lists.append(hits)
                     all_weights.append(BM25_WEIGHT)
-            # Also search full query for cross-cutting terms
-            full_hits = _bm25s_retrieve(query.split(), k=BM25S_TOP_K)
+            # Full query search too
+            full_tokens, _ = _tokenize_query(query)
+            full_hits = _bm25_retrieve(full_tokens, k=BM25_TOP_K)
             if full_hits:
                 all_lists.append(full_hits)
                 all_weights.append(BM25_WEIGHT / 2)
-
         else:
-            # Single-hop: use full query
-            hits = _bm25s_retrieve(query.split(), k=BM25S_TOP_K)
+            tokens, _ = _tokenize_query(query)
+            hits = _bm25_retrieve(tokens, k=BM25_TOP_K)
             if hits:
                 all_lists.append(hits)
                 all_weights.append(BM25_WEIGHT)
 
         # Year stream
-        _, year_tokens = _build_query_tokens(query)
+        _, year_tokens = _tokenize_query(query)
         if year_tokens:
-            year_hits = _bm25s_retrieve(year_tokens, k=200)
+            year_hits = _bm25_retrieve(year_tokens, k=200)
             if year_hits:
                 all_lists.append(year_hits)
                 all_weights.append(YEAR_WEIGHT)
@@ -236,41 +260,3 @@ def retrieve_batch(queries: list) -> list:
         all_page_results.append(top_pages)
 
     return all_page_results
-
-
-# ---------------------------------------------------------------------------
-# Query decomposition for multi-hop queries
-# ---------------------------------------------------------------------------
-
-def _decompose_query(query: str) -> list[str]:
-    """
-    Split multi-hop queries into sub-queries.
-
-    Patterns detected:
-      "What links X, Y, and Z" → ["X", "Y", "Z"]
-      "How do A, B, and C" → ["A", "B", "C"]
-      "Which X combines A with B" → ["A", "B"]
-    
-    Returns list of sub-queries, or [query] if no decomposition found.
-    """
-    q = query.strip()
-
-    # Pattern: "What links A, B, and C" / "How do A, B, and C"
-    m = re.match(
-        r"(?:what links|how do|how does|what connects)\s+(.+)",
-        q, re.IGNORECASE
-    )
-    if m:
-        parts_str = m.group(1)
-        # Split on ", " and " and "
-        parts = re.split(r",\s+(?:and\s+)?|\s+and\s+", parts_str)
-        parts = [p.strip().rstrip("?.,") for p in parts if len(p.strip()) > 5]
-        if len(parts) >= 2:
-            return parts
-
-    # Pattern: "Which X combines A with B"
-    m = re.match(r"which .+ combines (.+?) with (.+)", q, re.IGNORECASE)
-    if m:
-        return [m.group(1).strip(), m.group(2).strip().rstrip("?.,")]
-
-    return [query]
