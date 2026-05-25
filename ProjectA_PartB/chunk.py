@@ -25,9 +25,9 @@ from typing import Generator
 # ---------------------------------------------------------------------------
 # Tuneable constants
 # ---------------------------------------------------------------------------
-WINDOW_TOKENS  = 100   # approximate tokens per body chunk (1 token ≈ 1 word)
-STRIDE_TOKENS  = 75   # stride between windows (50-token overlap)
-MIN_CHUNK_TOKENS = 15  # discard tiny tail chunks
+WINDOW_TOKENS  = 200   # approximate tokens per body chunk (1 token ≈ 1 word)
+STRIDE_TOKENS  = 150   # stride between windows (50-token overlap)
+MIN_CHUNK_TOKENS = 20  # discard tiny tail chunks
 
 
 def _tokenize(text: str) -> list[str]:

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 utils.py — Shared utility functions.
 
@@ -14,19 +15,23 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+# ---------------------------------------------------------------------------
 # Artifact paths — single source of truth used by build and run
+# ---------------------------------------------------------------------------
 ARTIFACTS_DIR      = Path("artifacts")
 FAISS_INDEX_PATH   = str(ARTIFACTS_DIR / "faiss.index")
 CHUNK_META_PATH    = str(ARTIFACTS_DIR / "chunk_meta.json")
 CHUNK_VECTORS_PATH = str(ARTIFACTS_DIR / "chunk_vectors.npy")
-BM25_INV_PATH      = str(ARTIFACTS_DIR / "bm25_index.json")
-BM25_STATS_PATH    = str(ARTIFACTS_DIR / "bm25_stats.json")
+BM25S_INDEX_PATH   = str(ARTIFACTS_DIR / "bm25s_index")
+
 
 CORPUS_DIR         = Path("data") / "Wikipedia Entries"
 PUBLIC_QUERIES_PATH = Path("data") / "public_queries.json"
 
 
+# ---------------------------------------------------------------------------
 # Corpus loading
+# ---------------------------------------------------------------------------
 
 def load_corpus(corpus_dir: str | Path = CORPUS_DIR) -> list[dict]:
     """
@@ -57,7 +62,9 @@ def load_public_queries(path: str | Path = PUBLIC_QUERIES_PATH) -> list[dict]:
         return json.load(f)
 
 
+# ---------------------------------------------------------------------------
 # Timing
+# ---------------------------------------------------------------------------
 
 @contextmanager
 def timer(label: str):
@@ -75,7 +82,9 @@ def timer(label: str):
     print(f"[{label}] done in {elapsed:.2f}s")
 
 
+# ---------------------------------------------------------------------------
 # Eval constants — imported by eval.py
+# ---------------------------------------------------------------------------
 K_EVAL = 10   # NDCG@K cutoff used by the autograder
 
 
@@ -88,7 +97,9 @@ def normalize_page_id(pid) -> int:
     return int(pid)
 
 
+# ---------------------------------------------------------------------------
 # Misc
+# ---------------------------------------------------------------------------
 
 def ensure_artifacts_dir() -> None:
     """Create the artifacts/ directory if it doesn't exist."""
@@ -100,8 +111,7 @@ def check_artifacts_present() -> bool:
     required = [
         FAISS_INDEX_PATH,
         CHUNK_META_PATH,
-        BM25_INV_PATH,
-        BM25_STATS_PATH,
+        BM25S_INDEX_PATH,
     ]
     missing = [p for p in required if not os.path.exists(p)]
     if missing:

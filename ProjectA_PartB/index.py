@@ -1,22 +1,22 @@
+#!/usr/bin/env python3
 """
 index.py — Offline index construction.
 
-Two indexes are built and saved to artifacts/:
+Two indexes:
 
 1. FAISS IVFFlat (dense ANN)
-   - Inner-product metric (vectors are L2-normalised, so IP == cosine).
-   - nlist = max(64, sqrt(N)) centroids — good recall/speed trade-off.
+   - Inner-product metric (L2-normalised vectors → cosine via dot product)
    - Saved as: artifacts/faiss.index
 
-2. BM25 inverted index (sparse keyword)
-   - Pure Python, no extra dependencies.
-   - Stores TF-IDF-style term weights per chunk.
-   - Saved as: artifacts/bm25_index.json  (term → {chunk_id_str: score})
-   - Saved as: artifacts/bm25_avgdl.json  ({"avgdl": float, "N": int})
+2. BM25S sparse index (fast lexical search)
+   - Uses bm25s library: precomputes scores at index time into scipy sparse matrices
+   - 500x faster than JSON-dict BM25 at query time
+   - Built with stemming (Snowball) for better recall on paraphrastic queries
+   - Saved as: artifacts/bm25s_index/  (directory of bm25s internal files)
 
 Supporting files:
-   - artifacts/chunk_meta.json   — list of chunk dicts (without embeddings)
-   - artifacts/chunk_vectors.npy — raw float32 matrix (for HyDE)
+   - artifacts/chunk_meta.json    — chunk → page_id mapping
+   - artifacts/chunk_vectors.npy  — raw embeddings (for HyDE)
 """
 
 import json
@@ -24,19 +24,9 @@ import math
 import re
 import numpy as np
 import faiss
+import bm25s
 
 ARTIFACTS_DIR = "artifacts"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _bm25_tokenize(text: str) -> list[str]:
-    """Lowercase, strip punctuation, split on whitespace."""
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    return text.split()
 
 
 # ---------------------------------------------------------------------------
@@ -44,22 +34,11 @@ def _bm25_tokenize(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def build_faiss_index(vectors: np.ndarray) -> faiss.Index:
-    """
-    Build an IVFFlat index over the given L2-normalised vectors.
-
-    Args:
-        vectors: float32 array of shape (N, dim)
-
-    Returns:
-        Trained and populated faiss.Index
-    """
+    """Build IVFFlat index over L2-normalised vectors."""
     N, dim = vectors.shape
     nlist = max(64, int(math.sqrt(N)))
-
-    # IVFFlat with inner-product metric
     quantiser = faiss.IndexFlatIP(dim)
     index = faiss.IndexIVFFlat(quantiser, dim, nlist, faiss.METRIC_INNER_PRODUCT)
-
     print(f"  Training FAISS IVFFlat (N={N}, nlist={nlist}) ...")
     index.train(vectors)
     index.add(vectors)
@@ -72,17 +51,11 @@ def save_faiss_index(index: faiss.Index, path: str) -> None:
     print(f"  Saved FAISS index → {path}")
 
 
-def load_faiss_index(path: str, nprobe: int = 64) -> faiss.Index:
-    """
-    Load index from disk, set nprobe, and move to GPU if CUDA is available.
-
-    On GPU the IVF search runs ~10-30× faster than CPU for large corpora.
-    Falls back to CPU silently if faiss-gpu is not installed or no GPU found.
-    """
+def load_faiss_index(path: str, nprobe: int = 32) -> faiss.Index:
+    """Load FAISS index and move to GPU if available."""
     import torch
     index = faiss.read_index(path)
     index.nprobe = nprobe
-
     if torch.cuda.is_available():
         try:
             res = faiss.StandardGpuResources()
@@ -90,85 +63,59 @@ def load_faiss_index(path: str, nprobe: int = 64) -> faiss.Index:
             print("  FAISS index moved to GPU.")
         except Exception as e:
             print(f"  FAISS GPU unavailable ({e}), using CPU.")
-
     return index
 
 
 # ---------------------------------------------------------------------------
-# BM25 inverted index
+# BM25S index
 # ---------------------------------------------------------------------------
 
-def build_bm25_index(
-    chunks: list[dict],
-    k1: float = 1.5,
-    b: float = 0.75,
-) -> tuple[dict, dict]:
+def build_bm25s_index(chunks: list[dict]) -> bm25s.BM25:
     """
-    Build a BM25 inverted index over chunk texts.
+    Build a BM25S index over chunk texts.
 
-    Args:
-        chunks: list of chunk dicts (must have "chunk_id" and "text")
-        k1, b:  BM25 hyperparameters
+    BM25S precomputes all BM25 scores at index time and stores them
+    as scipy sparse matrices — query time is a fast matrix slice.
 
-    Returns:
-        (inverted_index, stats)
-        inverted_index: {term: {chunk_id_str: bm25_score}}
-        stats:          {"avgdl": float, "N": int}
+    Uses Snowball stemmer for better recall on paraphrastic queries.
     """
-    print("  Building BM25 index ...")
-    N = len(chunks)
+    print("  Building BM25S index ...")
+    corpus = [c["text"] for c in chunks]
 
-    # Step 1: tokenise all chunks, compute doc lengths and df
-    tokenised = []
-    df: dict[str, int] = {}
+    # Tokenize with stopword removal (stemmer API changed in bm25s 0.3+)
+    try:
+        import Stemmer
+        stemmer = Stemmer.Stemmer("english")
+    except ImportError:
+        stemmer = None
 
-    for chunk in chunks:
-        tokens = _bm25_tokenize(chunk["text"])
-        tokenised.append(tokens)
-        for term in set(tokens):
-            df[term] = df.get(term, 0) + 1
+    tokenized = bm25s.tokenize(
+        corpus,
+        stemmer=stemmer,
+        stopwords="en",
+        show_progress=True,
+    )
 
-    avgdl = sum(len(t) for t in tokenised) / max(N, 1)
+    retriever = bm25s.BM25(method="lucene", k1=1.5, b=0.75)
+    retriever.index(tokenized, show_progress=True)
 
-    # Step 2: compute BM25 scores per (term, chunk) pair
-    inverted: dict[str, dict[str, float]] = {}
-
-    for idx, (chunk, tokens) in enumerate(zip(chunks, tokenised)):
-        cid_str = str(chunk["chunk_id"])
-        dl = len(tokens)
-        tf_map: dict[str, int] = {}
-        for tok in tokens:
-            tf_map[tok] = tf_map.get(tok, 0) + 1
-
-        for term, tf in tf_map.items():
-            idf = math.log((N - df[term] + 0.5) / (df[term] + 0.5) + 1)
-            numerator = tf * (k1 + 1)
-            denominator = tf + k1 * (1 - b + b * dl / avgdl)
-            score = idf * (numerator / denominator)
-
-            if term not in inverted:
-                inverted[term] = {}
-            inverted[term][cid_str] = score
-
-    stats = {"avgdl": avgdl, "N": N}
-    print(f"  BM25 index built: {len(inverted)} unique terms, {N} chunks.")
-    return inverted, stats
+    print(f"  BM25S index built: {len(corpus)} chunks.")
+    return retriever
 
 
-def save_bm25_index(inverted: dict, stats: dict, inv_path: str, stats_path: str) -> None:
-    with open(inv_path, "w") as f:
-        json.dump(inverted, f)
-    with open(stats_path, "w") as f:
-        json.dump(stats, f)
-    print(f"  Saved BM25 index → {inv_path}, {stats_path}")
+def save_bm25s_index(retriever: bm25s.BM25, path: str) -> None:
+    """Save BM25S index to a directory."""
+    import os
+    os.makedirs(path, exist_ok=True)
+    retriever.save(path)
+    print(f"  Saved BM25S index → {path}/")
 
 
-def load_bm25_index(inv_path: str, stats_path: str) -> tuple[dict, dict]:
-    with open(inv_path) as f:
-        inverted = json.load(f)
-    with open(stats_path) as f:
-        stats = json.load(f)
-    return inverted, stats
+def load_bm25s_index(path: str) -> bm25s.BM25:
+    """Load BM25S index from directory."""
+    retriever = bm25s.BM25.load(path, load_corpus=False)
+    print(f"  Loaded BM25S index from {path}/")
+    return retriever
 
 
 # ---------------------------------------------------------------------------
@@ -176,13 +123,8 @@ def load_bm25_index(inv_path: str, stats_path: str) -> tuple[dict, dict]:
 # ---------------------------------------------------------------------------
 
 def save_chunk_meta(chunks: list[dict], path: str) -> None:
-    """Save chunk metadata (without embeddings) to JSON."""
     meta = [
-        {
-            "chunk_id":   c["chunk_id"],
-            "page_id":    c["page_id"],
-            "chunk_type": c["chunk_type"],
-        }
+        {"chunk_id": c["chunk_id"], "page_id": c["page_id"], "chunk_type": c["chunk_type"]}
         for c in chunks
     ]
     with open(path, "w") as f:
