@@ -1,49 +1,31 @@
+#!/usr/bin/env python3
 """
 main.py — Autograder entry point + offline index builder.
 
-The autograder calls:
-    from main import run
-    results = run(queries)   # queries: list[str]
-                             # returns: list[list[int]]
-
-The build script calls:
-    from main import build_offline_index
-    build_offline_index()
-
-Design:
-  - Indexes are loaded once (module-level, lazy) on first call to run().
-  - All queries are embedded in a single batched forward pass.
-  - retrieve_batch handles the three-path fusion internally.
+Autograder calls:   from main import run; run(queries)
+Build script calls: from main import build_offline_index; build_offline_index()
 """
 
 from utils import (
     FAISS_INDEX_PATH,
     CHUNK_META_PATH,
     CHUNK_VECTORS_PATH,
-    BM25_INV_PATH,
-    BM25_STATS_PATH,
-    check_artifacts_present,
+    BM25S_INDEX_PATH,
     ensure_artifacts_dir,
     load_corpus,
     timer,
 )
 from retrieve import load_indexes, retrieve_batch
 
-# ---------------------------------------------------------------------------
-# Offline index build (called by scripts/build_index.py)
-# ---------------------------------------------------------------------------
 
 def build_offline_index() -> None:
-    """
-    Build and save all artifacts from the corpus.
-    Run once on your machine before evaluating or submitting.
-    """
+    """Build and save all artifacts from the corpus."""
     from chunk import chunk_corpus
     from embed import embed_chunks
     from index import (
         build_faiss_index, save_faiss_index,
-        build_bm25_index,  save_bm25_index,
-        save_chunk_meta,   save_vectors,
+        build_bm25s_index, save_bm25s_index,
+        save_chunk_meta, save_vectors,
     )
 
     ensure_artifacts_dir()
@@ -66,50 +48,37 @@ def build_offline_index() -> None:
         faiss_index = build_faiss_index(vectors)
         save_faiss_index(faiss_index, FAISS_INDEX_PATH)
 
-    with timer("Building BM25 index"):
-        bm25_inv, bm25_stats = build_bm25_index(chunks)
-        save_bm25_index(bm25_inv, bm25_stats, BM25_INV_PATH, BM25_STATS_PATH)
+    with timer("Building BM25S index"):
+        bm25s_index = build_bm25s_index(chunks)
+        save_bm25s_index(bm25s_index, BM25S_INDEX_PATH)
 
-    print("\nAll artifacts saved to artifacts/. Ready to commit.")
+    print("\nAll artifacts saved. Ready to commit.")
 
 
 # ---------------------------------------------------------------------------
-# Pre-load guard (query time)
+# Runtime
 # ---------------------------------------------------------------------------
-_indexes_loaded = False
+_loaded = False
 
 
 def _ensure_loaded() -> None:
-    global _indexes_loaded
-    if _indexes_loaded:
+    global _loaded
+    if _loaded:
         return
-    if not check_artifacts_present():
-        raise RuntimeError(
-            "Artifacts are missing. Run python scripts/build_index.py first."
-        )
+    import os
+    missing = [p for p in [FAISS_INDEX_PATH, CHUNK_META_PATH, BM25S_INDEX_PATH]
+               if not os.path.exists(p)]
+    if missing:
+        raise RuntimeError(f"Missing artifacts: {missing}. Run python3 scripts/build_index.py first.")
     load_indexes(
-        faiss_path      = FAISS_INDEX_PATH,
-        meta_path       = CHUNK_META_PATH,
-        bm25_inv_path   = BM25_INV_PATH,
-        bm25_stats_path = BM25_STATS_PATH,
+        faiss_path  = FAISS_INDEX_PATH,
+        meta_path   = CHUNK_META_PATH,
+        bm25s_path  = BM25S_INDEX_PATH,
     )
-    _indexes_loaded = True
+    _loaded = True
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def run(queries: list[str]) -> list[list[int]]:
-    """
-    Retrieve the top-10 most relevant page IDs for each query.
-
-    Args:
-        queries: list of query strings (all evaluation queries at once)
-
-    Returns:
-        list of lists of int page_ids, one ranked list per query.
-        Only the first 10 IDs per list are scored by the autograder.
-    """
+    """Return top-10 page IDs per query. Called by autograder."""
     _ensure_loaded()
     return retrieve_batch(queries)
