@@ -16,15 +16,19 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# Artifact paths — single source of truth used by build and run
+# Artifact paths — single source of truth used by build and run.
+# Anchored to this file's directory, not the process cwd: the autograder
+# imports main from its own working directory, so cwd-relative paths break.
 # ---------------------------------------------------------------------------
-ARTIFACTS_DIR    = Path("artifacts")
+_ROOT = Path(__file__).resolve().parent
+
+ARTIFACTS_DIR    = _ROOT / "artifacts"
 SYNTH_INDEX_PATH = str(ARTIFACTS_DIR / "synth_index.npz")
 SYNTH_META_PATH  = str(ARTIFACTS_DIR / "synth_meta.json")
 
 
-CORPUS_DIR         = Path("data") / "Wikipedia Entries"
-PUBLIC_QUERIES_PATH = Path("data") / "public_queries.json"
+CORPUS_DIR         = _ROOT / "data" / "Wikipedia Entries"
+PUBLIC_QUERIES_PATH = _ROOT / "data" / "public_queries.json"
 
 
 # ---------------------------------------------------------------------------
