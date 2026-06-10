@@ -7,10 +7,8 @@ Build script calls: from main import build_offline_index; build_offline_index()
 """
 
 from utils import (
-    FAISS_INDEX_PATH,
-    CHUNK_META_PATH,
-    CHUNK_VECTORS_PATH,
-    BM25_PREFIX,
+    SYNTH_INDEX_PATH,
+    SYNTH_META_PATH,
     ensure_artifacts_dir,
     load_corpus,
     timer,
@@ -20,37 +18,18 @@ from retrieve import load_indexes, retrieve_batch
 
 def build_offline_index() -> None:
     """Build and save all artifacts from the corpus."""
-    from chunk import chunk_corpus
-    from embed import embed_chunks
-    from index import (
-        build_faiss_index, save_faiss_index,
-        build_bm25_index,  save_bm25_index,
-        save_chunk_meta,   save_vectors,
-    )
+    from index import build_synth_index, save_synth_index
 
     ensure_artifacts_dir()
 
     with timer("Loading corpus"):
         pages = load_corpus()
 
-    with timer("Chunking"):
-        chunks = chunk_corpus(pages)
-        print(f"  {len(chunks)} total chunks from {len(pages)} pages.")
+    with timer("Building synthetic-page index"):
+        index = build_synth_index(pages)
 
-    with timer("Embedding chunks"):
-        vectors = embed_chunks(chunks, show_progress=True)
-
-    with timer("Saving metadata and vectors"):
-        save_chunk_meta(chunks, CHUNK_META_PATH)
-        save_vectors(vectors, CHUNK_VECTORS_PATH)
-
-    with timer("Building FAISS index"):
-        faiss_index = build_faiss_index(vectors)
-        save_faiss_index(faiss_index, FAISS_INDEX_PATH)
-
-    with timer("Building BM25 numpy index"):
-        bm25 = build_bm25_index(chunks)
-        save_bm25_index(bm25, BM25_PREFIX)
+    with timer("Saving artifacts"):
+        save_synth_index(index, SYNTH_INDEX_PATH, SYNTH_META_PATH)
 
     print("\nAll artifacts saved. Ready to commit.")
 
@@ -66,15 +45,10 @@ def _ensure_loaded() -> None:
     if _loaded:
         return
     import os
-    missing = [p for p in [FAISS_INDEX_PATH, CHUNK_META_PATH, BM25_PREFIX + "_vocab.json"]
-               if not os.path.exists(p)]
+    missing = [p for p in [SYNTH_INDEX_PATH, SYNTH_META_PATH] if not os.path.exists(p)]
     if missing:
         raise RuntimeError(f"Missing artifacts: {missing}. Run python3 scripts/build_index.py first.")
-    load_indexes(
-        faiss_path  = FAISS_INDEX_PATH,
-        meta_path   = CHUNK_META_PATH,
-        bm25_prefix = BM25_PREFIX,
-    )
+    load_indexes(npz_path=SYNTH_INDEX_PATH, meta_path=SYNTH_META_PATH)
     _loaded = True
 
 

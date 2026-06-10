@@ -18,11 +18,9 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Artifact paths — single source of truth used by build and run
 # ---------------------------------------------------------------------------
-ARTIFACTS_DIR      = Path("artifacts")
-FAISS_INDEX_PATH   = str(ARTIFACTS_DIR / "faiss.index")
-CHUNK_META_PATH    = str(ARTIFACTS_DIR / "chunk_meta.json")
-CHUNK_VECTORS_PATH = str(ARTIFACTS_DIR / "chunk_vectors.npy")
-BM25_PREFIX        = str(ARTIFACTS_DIR / "bm25")
+ARTIFACTS_DIR    = Path("artifacts")
+SYNTH_INDEX_PATH = str(ARTIFACTS_DIR / "synth_index.npz")
+SYNTH_META_PATH  = str(ARTIFACTS_DIR / "synth_meta.json")
 
 
 CORPUS_DIR         = Path("data") / "Wikipedia Entries"
@@ -72,8 +70,8 @@ def timer(label: str):
     Context manager that prints elapsed time for a block.
 
     Usage:
-        with timer("Building FAISS index"):
-            build_faiss_index(...)
+        with timer("Building index"):
+            build_synth_index(...)
     """
     t0 = time.perf_counter()
     print(f"[{label}] starting ...")
@@ -108,11 +106,7 @@ def ensure_artifacts_dir() -> None:
 
 def check_artifacts_present() -> bool:
     """Return True if all required artifact files exist."""
-    required = [
-        FAISS_INDEX_PATH,
-        CHUNK_META_PATH,
-        BM25_PREFIX + "_vocab.json",
-    ]
+    required = [SYNTH_INDEX_PATH, SYNTH_META_PATH]
     missing = [p for p in required if not os.path.exists(p)]
     if missing:
         print("Missing artifacts:", missing)

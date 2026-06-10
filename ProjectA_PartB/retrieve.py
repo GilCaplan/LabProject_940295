@@ -1,208 +1,129 @@
 #!/usr/bin/env python3
 """
-retrieve.py — Fast BM25 retrieval with query decomposition.
+retrieve.py — Query-time scoring over the synthetic-page index.
 
-Uses numpy CSR sparse BM25 (no scipy/bm25s) — compliant with import rules.
-Speed comes from numpy vectorized scoring instead of Python loops.
+Score per (query, page) — three normalized signals plus a number gate,
+weights validated on the public query set:
 
-Key techniques:
-  - Query decomposition: "What links X, Y, Z" → 3 independent searches
-  - Year expansion: "1820s" → ["1820".."1829"]
-  - Porter stemmer (pure Python): "modernized" → "modern"
-  - Weighted RRF fusion
-  - Summary chunk 1.5x boost
+  1. dense_max : best chunk cosine (MiniLM)  — multi-fact context match
+  2. dense_sum : summary-chunk cosine        — lead sentence carries the
+                 decisive template facts
+  3. year      : idf-weighted exact year match, with decade expansion
+                 ("1820s" -> 1820..1829) — years are generator slot values
+                 and MiniLM is weak on digits
+  4. nummatch  : exact non-year number overlap (populations, point totals)
+
+  score = norm(dense_max) + norm(dense_sum) + norm(year) + 0.3 * nummatch
 """
 
+import math
 import re
-from collections import defaultdict
-import numpy as np
-import faiss
 
-BM25_TOP_K  = 200
-RRF_K       = 60
+import numpy as np
+
+NUM_WEIGHT  = 0.3
 FINAL_TOP_N = 10
-BM25_WEIGHT = 8.0
-YEAR_WEIGHT = 4.0
 
 
 # ---------------------------------------------------------------------------
 # Singleton store
 # ---------------------------------------------------------------------------
 class _Store:
-    faiss_index = None
-    bm25_index  = None
-    chunk_meta  = None
+    index = None
 
 _store = _Store()
 
 
-def load_indexes(faiss_path, meta_path, bm25_prefix, **kwargs):
-    if _store.faiss_index is not None:
+def load_indexes(npz_path: str, meta_path: str, **kwargs) -> None:
+    if _store.index is not None:
         return
-    from index import load_faiss_index, load_chunk_meta, load_bm25_index
-    print("Loading indexes ...")
-    _store.faiss_index = load_faiss_index(faiss_path)
-    _store.chunk_meta  = load_chunk_meta(meta_path)
-    _store.bm25_index  = load_bm25_index(bm25_prefix)
-    print("Indexes loaded.")
+    from index import load_synth_index
+    print("Loading index ...")
+    _store.index = load_synth_index(npz_path, meta_path)
+    # precompute per-page number sets
+    _store.index["page_num_sets"] = [set(ns) for ns in _store.index["page_nums"]]
+    _store.index["chunk_year_sets"] = [set(ys) for ys in _store.index["chunk_years"]]
+    print("Index loaded.")
 
 
 # ---------------------------------------------------------------------------
-# Porter stemmer (pure Python, no deps)
-# ---------------------------------------------------------------------------
-class _PorterStemmer:
-    def __init__(self):
-        self._vowels = set("aeiou")
-
-    def _cons(self, word, i):
-        if word[i] in self._vowels: return False
-        if word[i] == "y": return i == 0 or not self._cons(word, i - 1)
-        return True
-
-    def _m(self, word):
-        n, i, L = 0, 0, len(word)
-        while i < L and not self._cons(word, i): i += 1
-        while i < L:
-            while i < L and not self._cons(word, i): i += 1
-            while i < L and self._cons(word, i): i += 1
-            n += 1
-        return n
-
-    def _has_vowel(self, word):
-        return any(not self._cons(word, i) for i in range(len(word)))
-
-    def stem(self, word):
-        if len(word) <= 2: return word
-        w = word.lower()
-        if w.endswith("sses"): w = w[:-2]
-        elif w.endswith("ies"): w = w[:-2]
-        elif w.endswith("ss"): pass
-        elif w.endswith("s"): w = w[:-1]
-        if w.endswith("eed"):
-            if self._m(w[:-3]) > 0: w = w[:-1]
-        elif w.endswith("ed"):
-            s = w[:-2]
-            if self._has_vowel(s):
-                w = s
-                if w.endswith(("at","bl","iz")): w += "e"
-                elif len(w)>1 and self._cons(w,-1) and self._cons(w,-2) and w[-1]==w[-2] and w[-1] not in "lsz": w=w[:-1]
-        elif w.endswith("ing"):
-            s = w[:-3]
-            if self._has_vowel(s):
-                w = s
-                if w.endswith(("at","bl","iz")): w += "e"
-                elif len(w)>1 and self._cons(w,-1) and self._cons(w,-2) and w[-1]==w[-2] and w[-1] not in "lsz": w=w[:-1]
-        if w.endswith("y") and len(w)>1 and self._has_vowel(w[:-1]): w=w[:-1]+"i"
-        for suf,rep in [("ational","ate"),("tional","tion"),("enci","ence"),("anci","ance"),
-                        ("izer","ize"),("bli","ble"),("alli","al"),("entli","ent"),("eli","e"),
-                        ("ousli","ous"),("ization","ize"),("ation","ate"),("ator","ate"),
-                        ("alism","al"),("iveness","ive"),("fulness","ful"),("ousness","ous"),
-                        ("aliti","al"),("iviti","ive"),("biliti","ble")]:
-            if w.endswith(suf) and self._m(w[:-len(suf)])>0: w=w[:-len(suf)]+rep; break
-        for suf,rep in [("icate","ic"),("ative",""),("alize","al"),("iciti","ic"),("ical","ic"),("ful",""),("ness","")]:
-            if w.endswith(suf) and self._m(w[:-len(suf)])>0: w=w[:-len(suf)]+rep; break
-        for suf in ["al","ance","ence","er","ic","able","ible","ant","ement","ment","ent","ion","ou","ism","ate","iti","ous","ive","ize"]:
-            stem=w[:-len(suf)]
-            if w.endswith(suf) and self._m(stem)>1:
-                if suf=="ion" and stem and stem[-1] in "st": w=stem
-                elif suf!="ion": w=stem
-                break
-        if w.endswith("e"):
-            s=w[:-1]
-            if self._m(s)>1: w=s
-            elif self._m(s)==1: w=s
-        if len(w)>1 and w[-1]==w[-2]=="l" and self._cons(w,-1) and self._m(w)>1: w=w[:-1]
-        return w
-
-_stemmer = _PorterStemmer()
-
-
-# ---------------------------------------------------------------------------
-# Query processing
+# Query slot extraction
 # ---------------------------------------------------------------------------
 
 def _expand_decades(t: str) -> list:
-    m = re.match(r"(\d{3})0s", t)
+    m = re.match(r"(\d{3})0s$", t)
     if m:
         base = int(m.group(1)) * 10
         return [str(base + i) for i in range(10)]
-    m = re.match(r"(\d{2})(\d{2})s", t)
+    m = re.match(r"(\d{2})(\d{2})s$", t)
     if m:
         base = int(m.group(1) + m.group(2))
         return [str(base + i) for i in range(10)]
     return [t]
 
 
-def _tokenize_query(query: str) -> tuple:
-    """
-    Returns (main_tokens, year_tokens).
-    Main tokens are stemmed. Years are expanded from decades.
-    """
-    text = re.sub(r"[^a-z0-9\s]", " ", query.lower())
-    main_tokens = []
-    year_tokens = []
-
-    for t in text.split():
-        expanded = _expand_decades(t)
-        if len(expanded) > 1 or (len(expanded)==1 and re.match(r"\d{4}$", expanded[0])):
-            year_tokens.extend(expanded)
-            main_tokens.extend(expanded)
-        else:
-            stemmed = _stemmer.stem(t)
-            main_tokens.append(stemmed)
-            if stemmed != t:
-                main_tokens.append(t)
-
-    return main_tokens, year_tokens
+def _query_years(query: str) -> set:
+    years = set()
+    for t in re.findall(r"\b\d{3,4}0s\b|\b\d{4}\b", query.replace(",", "")):
+        years.update(_expand_decades(t))
+    return years
 
 
-def _decompose_query(query: str) -> list:
-    """Split multi-hop queries into sub-queries."""
-    q = query.strip()
-    m = re.match(r"(?:what links|how do|how does|what connects)\s+(.+)", q, re.IGNORECASE)
-    if m:
-        parts = re.split(r",\s+(?:and\s+)?|\s+and\s+", m.group(1))
-        parts = [p.strip().rstrip("?.,") for p in parts if len(p.strip()) > 5]
-        if len(parts) >= 2:
-            return parts
-    m = re.match(r"which .+ combines (.+?) with (.+)", q, re.IGNORECASE)
-    if m:
-        return [m.group(1).strip(), m.group(2).strip().rstrip("?.,")]
-    return [query]
+def _query_nums(query: str) -> set:
+    nums = {m for m in re.findall(r"\b\d+(?:\.\d+)?\b", query.replace(",", ""))
+            if not re.match(r"^\d{4}$", m)}
+    return nums - {"10"}
 
 
 # ---------------------------------------------------------------------------
-# Retrieval helpers
+# Scoring
 # ---------------------------------------------------------------------------
 
-def _bm25_retrieve(tokens: list, k: int = 200) -> list:
-    """Fast numpy CSR BM25 retrieval."""
-    from index import bm25_query
-    return bm25_query(_store.bm25_index, tokens, k=k)
+def _norm(v: np.ndarray) -> np.ndarray:
+    mx = v.max()
+    return v / mx if mx > 0 else v
 
 
-def _rrf_fuse(ranked_lists: list, weights: list = None) -> dict:
-    if weights is None:
-        weights = [1.0] * len(ranked_lists)
-    scores = defaultdict(float)
-    for ranked, w in zip(ranked_lists, weights):
-        for rank, (cid, _) in enumerate(ranked):
-            scores[cid] += w / (RRF_K + rank + 1)
-    return scores
+def _score_query(query: str, qvec: np.ndarray) -> np.ndarray:
+    idx = _store.index
+    vectors    = idx["vectors"]
+    chunk_page = idx["chunk_page"]
+    is_summary = idx["is_summary"]
+    n_pages    = len(idx["page_ids"])
+    n_chunks   = len(vectors)
 
+    sims = vectors @ qvec
 
-def _to_pages(chunk_scores: dict) -> list:
-    meta = _store.chunk_meta
-    page_scores = defaultdict(float)
-    for cid, score in chunk_scores.items():
-        if cid >= len(meta):
-            continue
-        m = meta[cid]
-        boosted = score * (1.5 if m["chunk_type"] == "summary" else 1.0)
-        pid = int(m["page_id"])
-        if boosted > page_scores[pid]:
-            page_scores[pid] = boosted
-    return sorted(page_scores.items(), key=lambda x: x[1], reverse=True)
+    dense_max = np.zeros(n_pages, dtype=np.float32)
+    np.maximum.at(dense_max, chunk_page, sims)
+
+    dense_sum = np.zeros(n_pages, dtype=np.float32)
+    np.maximum.at(dense_sum, chunk_page, np.where(is_summary, sims, -1.0))
+
+    year_feat = np.zeros(n_pages, dtype=np.float32)
+    q_years = _query_years(query)
+    if q_years:
+        year_df = idx["year_df"]
+        chunk_scores = np.zeros(n_chunks, dtype=np.float32)
+        for ci, ys in enumerate(idx["chunk_year_sets"]):
+            hit = q_years & ys
+            if hit:
+                chunk_scores[ci] = sum(
+                    math.log(1 + n_chunks / (1 + year_df.get(y, 0))) for y in hit
+                )
+        np.maximum.at(year_feat, chunk_page, chunk_scores)
+
+    score = _norm(dense_max) + _norm(dense_sum) + _norm(year_feat)
+
+    q_nums = _query_nums(query)
+    if q_nums:
+        nummatch = np.array(
+            [len(q_nums & pn) / len(q_nums) for pn in idx["page_num_sets"]],
+            dtype=np.float32,
+        )
+        score = score + NUM_WEIGHT * nummatch
+
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -210,53 +131,14 @@ def _to_pages(chunk_scores: dict) -> list:
 # ---------------------------------------------------------------------------
 
 def retrieve_batch(queries: list) -> list:
-    """
-    Retrieve top-10 page IDs per query.
-    Multi-hop queries decomposed into sub-queries for better recall.
-    Fast numpy BM25 scoring — no Python loops over chunks.
-    """
-    all_page_results = []
-    for query in queries:
-        sub_queries  = _decompose_query(query)
-        is_multihop  = len(sub_queries) > 1
-        all_lists    = []
-        all_weights  = []
+    """Return top-10 page IDs per query (batched query embedding)."""
+    from embed import embed_queries
+    qvecs = embed_queries(queries)
 
-        if is_multihop:
-            for sub_q in sub_queries:
-                tokens, _ = _tokenize_query(sub_q)
-                hits = _bm25_retrieve(tokens, k=BM25_TOP_K)
-                if hits:
-                    all_lists.append(hits)
-                    all_weights.append(BM25_WEIGHT)
-            # Full query search too
-            full_tokens, _ = _tokenize_query(query)
-            full_hits = _bm25_retrieve(full_tokens, k=BM25_TOP_K)
-            if full_hits:
-                all_lists.append(full_hits)
-                all_weights.append(BM25_WEIGHT / 2)
-        else:
-            tokens, _ = _tokenize_query(query)
-            hits = _bm25_retrieve(tokens, k=BM25_TOP_K)
-            if hits:
-                all_lists.append(hits)
-                all_weights.append(BM25_WEIGHT)
-
-        # Year stream
-        _, year_tokens = _tokenize_query(query)
-        if year_tokens:
-            year_hits = _bm25_retrieve(year_tokens, k=200)
-            if year_hits:
-                all_lists.append(year_hits)
-                all_weights.append(YEAR_WEIGHT)
-
-        if not all_lists:
-            all_page_results.append([])
-            continue
-
-        chunk_scores = _rrf_fuse(all_lists, all_weights)
-        page_ranked  = _to_pages(chunk_scores)
-        top_pages    = [int(pid) for pid, _ in page_ranked[:FINAL_TOP_N]]
-        all_page_results.append(top_pages)
-
-    return all_page_results
+    page_ids = _store.index["page_ids"]
+    results = []
+    for qi, query in enumerate(queries):
+        scores = _score_query(query, qvecs[qi])
+        order = np.argsort(-scores)[:FINAL_TOP_N]
+        results.append([int(page_ids[i]) for i in order])
+    return results
