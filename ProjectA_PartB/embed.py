@@ -12,6 +12,8 @@ Key design choices:
     multiple times from run() does NOT reload weights.
 """
 
+from pathlib import Path
+
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -19,6 +21,9 @@ _BATCH_SIZE_GPU = 512
 _BATCH_SIZE_CPU = 128
 
 _MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+# Weights committed to the repo so run() never depends on network access or a
+# pre-populated HF cache at grading time; falls back to the hub name if absent.
+_LOCAL_MODEL_DIR = Path(__file__).resolve().parent / "models" / "all-MiniLM-L6-v2"
 _model: SentenceTransformer | None = None
 
 
@@ -26,8 +31,9 @@ def _get_model() -> SentenceTransformer:
     """Lazy-load and cache the embedding model (auto-selects CUDA/CPU)."""
     global _model
     if _model is None:
-        print("  Loading embedding model ...")
-        _model = SentenceTransformer(_MODEL_NAME)
+        source = str(_LOCAL_MODEL_DIR) if _LOCAL_MODEL_DIR.is_dir() else _MODEL_NAME
+        print(f"  Loading embedding model from {source} ...")
+        _model = SentenceTransformer(source)
         print(f"  Device: {_model.device}")
     return _model
 
