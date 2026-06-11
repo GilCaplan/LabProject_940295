@@ -6,12 +6,10 @@ nohup.out
 .DS_Store
 .idea/
 .vscode/
-ProjectA_PartA/data/
-ProjectA_PartA/__pycache__/
-ProjectA_PartB/data/*
-!ProjectA_PartB/data/public_queries.json
+data/*
+!data/public_queries.json
 ProjectA_PartB/__pycache__/
 ProjectA_PartB/artifacts/*.npy
 ProjectA_PartB/artifacts/*.index
-ProjectA_PartB/artifacts/bm25_index.json
+artifacts/bm25_index.json
 ProjectA_PartB/experiments/
