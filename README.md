@@ -3,8 +3,7 @@
 ## Team
 Guy Dukas, Gil Caplan, Murad Rahimli 
 
-## Video presentation
-[Link to video — max 3:00, at most 10 slides]
+## Video presentation - [Video](https://youtu.be/B_3QpJ7_gH8)
 
 ---
 
