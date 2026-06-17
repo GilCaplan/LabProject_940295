@@ -3,7 +3,7 @@
 ## Team
 Guy Dukas, Gil Caplan, Murad Rahimli 
 
-## Video presentation - [Video](https://youtu.be/B_3QpJ7_gH8)
+##  [Video Presentation - Click Here](https://youtu.be/B_3QpJ7_gH8)
 
 ---
 
