@@ -1,0 +1,15 @@
+=== Synthetic Augmentation Research Report ===
+5-fold honest CV (synthetic variants generated ONLY from training-fold positives)
+real-only mean AUC : 0.7980  (per-fold: ['0.831', '0.787', '0.837', '0.791', '0.744'])
+augmented mean AUC : 0.7823  (per-fold: ['0.790', '0.765', '0.859', '0.776', '0.721'])
+delta (aug - real) : -0.0157
+per-fold wins for augmented: 1/5
+VERDICT: NOT HELPFUL: augmentation did not improve (or hurt) honest held-out AUC.
+
+Caveat: this evaluates AUC via LogisticRegression on a simplified 5-feature
+subset (word/char tfidf cosine, jaccard, token_sort/set ratio), not the full
+15-feature deployed model, and synthetic positives here are A-title-vs-degraded-
+A-title clones (proxy for real TableB abbreviation degradation), not real B rows.
+Because the synthetic pairs are systematically EASIER (a title degraded from
+itself retains more structure than an independently-authored catalog listing),
+any AUC gain here is an OPTIMISTIC estimate of the augmentation's true value.

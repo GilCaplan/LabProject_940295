@@ -1,0 +1,7 @@
+Strategy: dense sentence-embedding similarity blocking
+Model: sentence-transformers/all-MiniLM-L6-v2
+TableA rows: 1363, TableB rows: 3226
+Top-K per TableA record: 4
+Candidate set size: 3000
+Proxy recall vs 100_matches.pkl (before exclusion): 0.820 (82/100)
+Total runtime (s): 8.6

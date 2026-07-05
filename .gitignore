@@ -3,3 +3,6 @@ __pycache__/
 *.zip
 *.pkl
 .DS_Store
+CLAUDE.md
+finetuned_model/
+checkpoints/

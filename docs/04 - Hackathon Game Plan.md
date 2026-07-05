@@ -29,9 +29,64 @@ Study order: [[Lecture 6 - Data Integration]] → [[01 - Blocking Strategies Che
 8. **Iterate only if time remains**: try alternate blocking keys, tune `top_k` in embeddings, try lowering/raising the score threshold, re-check PC/PQ each time. If there's real time to spare and the pair count is small enough, consider a final LLM rescoring pass (zero-shot "are these the same entity?" prompt) on your borderline pairs only — recent work (ComEM, BATCHER) shows simple zero-shot prompts work surprisingly well for EM, but this is a bonus, not a baseline dependency.
 9. **Freeze and submit early** — don't tune until the deadline; leave 15–20 min buffer for format/submission issues.
 
+## Parallel subagent exploration (once TableA.csv/TableB.csv/100_matches.pkl exist)
+
+Instead of trying blocking strategies one at a time in sequence, launch the specialized
+subagents defined in `.claude/agents/` (see `CLAUDE.md` for the full breakdown) to try several
+approaches at once:
+
+1. Launch `blocking-rules`, `blocking-tfidf`, `blocking-lsh`, `blocking-embeddings`,
+   `blocking-sorted-neighborhood`, `blocking-deepblocker` in parallel, all directly against the
+   main working directory (no worktree isolation — each writes a distinct `candidates_<strategy>.pkl`
+   filename so there's nothing to collide, and isolation would actively break things here since
+   `TableA.csv`/`TableB.csv` are untracked and `*.pkl` is gitignored, so a fresh worktree checkout
+   wouldn't have the input data at all). Each strategy agent reports recall against the 100 known
+   matches independently. SNM is included specifically for signal diversity (proximity-in-sort-order
+   rather than token/vector similarity), and DeepBlocker for self-supervised tuple-embedding
+   diversity — both exist to give the learned-scorer merge step more to work with, not to duplicate
+   another agent's signal. DeepBlocker is the slowest, so launch it with the rest, not after.
+2. Once those land, run `ensemble-merger` (Opus) — it pools all candidates, engineers similarity
+   features, trains a small learned scorer (logistic regression) on the 100 known matches vs.
+   sampled negatives, ranks the full pool, and truncates to the final `<sid>.pkl` under the
+   2000-pair cap. This generally beats simple union/truncation because it lets weaker signals
+   (e.g. a mediocre LSH match reinforced by a decent TF-IDF score) still surface if the combined
+   evidence is strong.
+3. This replaces steps 3–6 of the day-of sequence below with a parallelized version — still do
+   step 1 (load+explore) and step 2 (normalize) once, up front, since every strategy agent needs
+   clean data to start from.
+
+Model choice: run the six strategy agents on Sonnet (fast, cheap, well-trodden techniques);
+save Opus for the `ensemble-merger` step where budget-constrained pair selection needs real
+judgment. Fable isn't a fit for any part of this task.
+
 ## Time-boxing (adjust to actual event length)
 - If it's a half-day event (~4 hrs): ~30 min explore/plan, ~90 min build baseline pipeline (steps 1–4), ~60 min add embeddings + tune, ~30 min validate/iterate, ~30 min buffer.
 - Whatever the real length, reserve the **last 10–15% of total time** purely for output formatting + submission — a correct pipeline with a malformed output file scores zero.
+
+### Confirmed 3-hour plan (this run)
+Dependencies + the sentence-transformers model are pre-installed/pre-cached already, so no
+setup time is needed once data lands.
+- **0:00–0:15** — data lands, quick schema check (column names, row counts, id format), sanity
+  fixes if needed (e.g. missing values in text fields).
+- **0:15–1:05** — launch all six strategy agents (`blocking-rules`, `blocking-tfidf`,
+  `blocking-lsh`, `blocking-embeddings`, `blocking-sorted-neighborhood`, `blocking-deepblocker`)
+  in parallel, directly in the main working directory (no worktree isolation — see note above on
+  why that would break these agents). Check in on progress/output around the 40-min mark for any
+  agent stuck or erroring (e.g. embeddings/deepblocker failing silently on model load) and unblock
+  it — deepblocker is the slowest so it's the most likely to still be running at this checkpoint.
+- **1:05–1:45** — run `ensemble-merger` once all six `candidates_*.pkl` exist (Steps 1–5, plain
+  learned-score ranking, no borderline rescoring yet). Review its recall breakdown — if overall
+  recall is uncomfortably below 0.6, loop back and ask a strategy agent to widen its candidate
+  pool (this is the single highest-leverage move per the grading formula).
+- **1:45–2:15** — stretch goal if recall is comfortably above 0.6 already: re-run `ensemble-merger`
+  with the Step 5.5 borderline-rescoring pass (LLM zero-shot rescoring of pairs near the 2000
+  cutoff) to squeeze marginal recall for rank. Skip this entirely if recall is still below 0.6 —
+  fixing that is worth far more than rank-tuning.
+- **2:15–2:40** — sanity-check final set, spot-check a sample of pairs by eye, confirm
+  `validate_candidate_set` passes.
+- **2:40–2:50** — get the real student id from the user, `save_submission`, zip per submission
+  instructions.
+- **2:50–3:00** — buffer for anything going wrong.
 
 ## Mental checklist while coding (catches the point-losing mistakes)
 - Am I deduping unordered pairs `(a,b)==(b,a)`?

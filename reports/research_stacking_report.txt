@@ -1,0 +1,10 @@
+=== Stacking Meta-Learner vs Naive Averaging (honest OOF, greedy 1:1 top-2000 proxy recall) ===
+
+12 negative-sampling seeds: [1, 7, 13, 21, 42, 3, 55, 99, 123, 2024, 77, 888]
+
+naive average : mean=0.8975  std=0.0136  min=0.8800  max=0.9200
+stacking      : mean=0.8900  std=0.0071  min=0.8800  max=0.9000
+stacking - naive per-seed delta mean: -0.0075
+record: 2 WINS / 4 TIES / 6 LOSSES for stacking vs naive
+
+VERDICT: NAIVE AVERAGING WINS OR STACKING IS WORSE/NOISIER: do not replace the deployed naive average.
