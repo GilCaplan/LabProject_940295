@@ -1,0 +1,8 @@
+pandas
+numpy
+scikit-learn
+rapidfuzz
+sentence-transformers
+faiss-cpu
+datasketch
+recordlinkage
