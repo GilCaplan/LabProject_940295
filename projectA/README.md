@@ -5,6 +5,8 @@ Guy Dukas, Gil Caplan, Murad Rahimli
 
 ## [Video Presentation — Click Here](https://youtu.be/B_3QpJ7_gH8)
 
+Official assignment spec: [`instructions.pdf`](instructions.pdf).
+
 This branch covers both sections of **Project A**:
 - **Section A** ([`ProjectA_PartA/`](ProjectA_PartA/)) — a dynamic in-memory vector index.
 - **Section B** ([`ProjectA_PartB/`](ProjectA_PartB/)) — a retrieval pipeline over a
