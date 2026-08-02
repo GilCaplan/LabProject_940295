@@ -1,0 +1,9 @@
+Sorted Neighborhood Method (SNM) - recall report
+Sort keys used: title (w=6), brand_token (w=6), price (w=7, title-prefix fallback for nulls)
+Per-key raw candidate counts (pre-union):
+  title: 7754
+  brand_token: 5766
+  price: 4160
+Final candidate set size: 5000
+Proxy recall vs 100_matches.pkl: 0.570 (57/100)
+NOTE: the 100 known matches were NOT excluded from this output file; exclusion happens once at the ensemble/submission step.

@@ -1,0 +1,16 @@
+=== Numeric/Version Token Feature Research Report ===
+positives (known matches): 100, hard negatives (TF-IDF top-5 non-match neighbors): 500
+known-match pairs where at least one side has a numeric token: 67/100
+numeric_jaccard mean: known-match=0.368 (std 0.425)  hard-negative=0.174 (std 0.338)
+numeric_mismatch_flag rate: known-match=0.030  hard-negative=0.220
+standalone AUC of numeric_jaccard alone: 0.632
+correlation(numeric_jaccard, word_jaccard): 0.321
+5-fold CV AUC, base (word_jaccard+token_sort_ratio) : 0.7885  ['0.807', '0.767', '0.859', '0.780', '0.730']
+5-fold CV AUC, +numeric features                    : 0.8103  ['0.821', '0.774', '0.864', '0.829', '0.763']
+AUC lift from adding numeric features: +0.0218
+VERDICT: PROMISING: numeric-token features add measurable independent AUC lift -- worth folding in as extra features (numeric_jaccard, numeric_mismatch_flag).
+
+Note: hard negatives here are per-positive TF-IDF top-5 nearest B rows
+(excluding the true match) -- NOT random pairs -- so this measures signal
+in the realistic 'confusable near-miss' regime the deployed classifier faces,
+not an inflated random-negative AUC.

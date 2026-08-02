@@ -1,0 +1,15 @@
+Strategy: fine-tuned (metric-learning) sentence-embedding similarity blocking
+Base model: sentence-transformers/all-MiniLM-L6-v2
+Loss: MultipleNegativesRankingLoss (in-batch negatives), epochs=8, batch_size=16, lr=2e-05
+TableA rows: 1363, TableB rows: 3226
+Top-K per TableA record: 4
+Final candidate set size: 3000
+
+NAIVE proxy recall (trained on all 100, evaluated on same 100 - INFLATED): 0.920 (92/100)
+HONEST cross-validated recall (5-fold, held-out never trained on): 0.830
+Per-fold recalls: [1.0, 0.7, 0.8, 0.85, 0.8]
+
+Fine-tuning time (final model, all 100 pairs): 10.1s
+Cross-validation total time (5 folds): 54.9s
+Total script runtime (s): 70.3
+Fine-tuned model saved to: /Users/USER/Desktop/University/Semester 8/Lab/Hackathon/finetuned_model

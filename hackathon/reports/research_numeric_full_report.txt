@@ -1,0 +1,13 @@
+=== Numeric-Token Feature vs FULL 15-Feature Set ===
+
+Of 100 known matches, 67 have a numeric/version token on at least one side.
+Standalone AUC of numeric_jaccard alone (vs pool hard negatives): 0.6827
+correlation(numeric_jaccard, existing word-jaccard feature): 0.4253
+correlation(numeric_jaccard, existing cross-encoder feature): 0.3454
+
+12 seeds, 5-fold CV LogisticRegression AUC:
+  base (15 feats)      : mean=0.9424  std=0.0078  min=0.9287
+  plus (+2 numeric)    : mean=0.9350  std=0.0090  min=0.9176
+  delta mean: -0.0074  std: 0.0018  (wins: 0/12)
+
+VERDICT: NO LONGER HELPS (or hurts slightly) on top of the full feature set -- do not add.

@@ -1,0 +1,5 @@
+SimHash / random-hyperplane cosine-LSH blocking strategy
+N_HYPERPLANES=256, BAND_BITS=8, N_BANDS=32, HAMMING_THRESHOLD=95
+Final candidate pairs: 2598
+Proxy recall vs 100_matches.pkl: 0.760 (76/100)
+Runtime: 0.6s

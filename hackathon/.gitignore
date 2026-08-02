@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.zip
+*.pkl
+.DS_Store
+CLAUDE.md
+finetuned_model/
+checkpoints/

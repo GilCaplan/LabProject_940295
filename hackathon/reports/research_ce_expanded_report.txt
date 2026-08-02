@@ -1,0 +1,59 @@
+=== Cross-Encoder: Raw Text vs Abbreviation-Expanded Text ===
+
+Pool size: 20084; expansion fires on 8378 pairs (0.4171).
+Of the 100 known matches, expansion fires for 43 pairs.
+Eval set: 100 positives + 496 hard negatives (245 expansion-fired).
+
+FULL eval set  -- AUC raw-text CE: 0.8156   AUC expanded-text CE: 0.8258   delta: +0.0101
+FIRED subset (245 pairs) -- AUC raw-text CE: 0.7742   AUC expanded-text CE: 0.8005   delta: +0.0264
+
+Within fired subset -- mean CE score (raw / expanded):
+  known matches   (n= 43): raw=+6.130  expanded=+6.812  shift=+0.682
+  hard negatives  (n=202): raw=-0.014  expanded=+0.198  shift=+0.212
+
+Per-pair CE score shift for the known-match pairs where expansion fires:
+    A=   75 B= 1921  raw=+9.433  expanded=+9.523  shift=+0.091
+    A=  165 B= 1503  raw=+5.638  expanded=+8.127  shift=+2.490
+    A=  524 B= 2680  raw=+8.657  expanded=+8.706  shift=+0.049
+    A=  832 B= 2768  raw=+7.458  expanded=+7.915  shift=+0.457
+    A=  804 B= 2599  raw=+5.558  expanded=+5.442  shift=-0.116
+    A= 1195 B= 1028  raw=+8.077  expanded=+8.029  shift=-0.048
+    A=  774 B=  367  raw=+0.901  expanded=+5.720  shift=+4.818
+    A= 1199 B=  580  raw=+5.806  expanded=+5.292  shift=-0.514
+    A= 1182 B= 1531  raw=+0.084  expanded=+3.897  shift=+3.814
+    A=  199 B=   65  raw=+5.363  expanded=+6.693  shift=+1.330
+    A=  746 B= 2632  raw=+6.685  expanded=+6.769  shift=+0.085
+    A=  513 B= 2055  raw=+7.146  expanded=+8.040  shift=+0.893
+    A= 1146 B=  927  raw=+5.808  expanded=+6.013  shift=+0.205
+    A=  377 B= 2624  raw=+1.750  expanded=+1.125  shift=-0.625
+    A=  532 B= 2516  raw=+8.548  expanded=+8.598  shift=+0.050
+    A=  319 B= 3119  raw=+7.664  expanded=+7.252  shift=-0.413
+    A=  463 B= 2495  raw=+2.503  expanded=+3.232  shift=+0.729
+    A=  464 B= 2494  raw=+7.717  expanded=+7.327  shift=-0.389
+    A=  180 B= 1542  raw=+8.019  expanded=+8.194  shift=+0.175
+    A=  588 B=  558  raw=+5.714  expanded=+5.334  shift=-0.380
+    A= 1076 B= 2093  raw=+9.567  expanded=+9.600  shift=+0.033
+    A=  540 B= 2323  raw=+9.032  expanded=+9.020  shift=-0.012
+    A= 1139 B= 2197  raw=+7.147  expanded=+8.973  shift=+1.827
+    A=  709 B= 2786  raw=+9.392  expanded=+9.160  shift=-0.231
+    A=  457 B= 2622  raw=+4.856  expanded=+5.154  shift=+0.298
+    A= 1143 B= 2196  raw=+0.982  expanded=+1.090  shift=+0.108
+    A=  914 B= 2556  raw=+7.524  expanded=+7.274  shift=-0.250
+    A=  604 B= 1512  raw=+0.875  expanded=+7.417  shift=+6.542
+    A= 1165 B=  908  raw=+6.171  expanded=+6.082  shift=-0.089
+    A= 1062 B= 2063  raw=+8.731  expanded=+7.490  shift=-1.242
+    A= 1145 B=  904  raw=+5.736  expanded=+6.257  shift=+0.521
+    A=  632 B=  273  raw=+5.112  expanded=+5.641  shift=+0.530
+    A= 1114 B= 1420  raw=+4.505  expanded=+4.728  shift=+0.223
+    A=  810 B= 2586  raw=+8.442  expanded=+8.173  shift=-0.269
+    A=  396 B= 2470  raw=+0.080  expanded=+7.100  shift=+7.021
+    A= 1042 B= 2352  raw=+8.961  expanded=+8.888  shift=-0.072
+    A=  516 B=  893  raw=+6.803  expanded=+6.349  shift=-0.455
+    A=   89 B= 1616  raw=+8.457  expanded=+8.572  shift=+0.115
+    A= 1126 B=  941  raw=+7.511  expanded=+7.186  shift=-0.325
+    A=  837 B=  902  raw=+8.965  expanded=+8.922  shift=-0.044
+    A=  632 B=  924  raw=+4.651  expanded=+5.505  shift=+0.854
+    A= 1141 B=  929  raw=+6.452  expanded=+6.868  shift=+0.417
+    A= 1106 B=  956  raw=+5.107  expanded=+6.253  shift=+1.147
+
+correlation(raw CE score, expanded CE score) over full eval set: 0.9958

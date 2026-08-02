@@ -1,15 +1,6 @@
+.DS_Store
+*.zip
 __pycache__/
 *.py[cod]
-*.zip
-*.log
-nohup.out
-.DS_Store
 .idea/
 .vscode/
-data/*
-!data/public_queries.json
-ProjectA_PartB/__pycache__/
-ProjectA_PartB/artifacts/*.npy
-ProjectA_PartB/artifacts/*.index
-artifacts/bm25_index.json
-ProjectA_PartB/experiments/
