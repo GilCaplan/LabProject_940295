@@ -5,11 +5,11 @@ Guy Dukas, Gil Caplan, Murad Rahimli
 
 ## [Video Presentation — Click Here](https://youtu.be/hNOz35dc70M)
 
-> The instructor-provided harness, config, and datasets for both sections are
-> intentionally **not** included in this repo — `constants.yaml` and `utils.py` are
-> marked "do NOT submit" / "do NOT modify" by the course. Only the two files we were
-> asked to submit ([`strategy.py`](strategy.py), [`gnn.py`](gnn.py)) and our writeup are
-> published here.
+This repo includes the instructor-given assignment harness (config, evaluation script,
+entry point, framework utilities, and the blank starter files) alongside our completed
+solution, so anyone can set it up and attempt the assignment themselves. See
+[Repo layout](#repo-layout) below. The actual datasets are **not** included (see that
+section for why) — you'll need your own copy of the course data to run anything.
 
 ---
 
@@ -44,7 +44,6 @@ We also tried committee-based querying, SMOTE-style synthetic positives, and
 self-distillation; none beat this pipeline. Diagnosis: after active querying the training
 set is ~51% positive vs. ~33% in the pool, so validating hyperparameters on queried data
 picks the wrong values — this ruled out several fancier variants. See
-[`presentation_script.md`](presentation_script.md) and
 [`presentation/presentation.pdf`](presentation/presentation.pdf) for the full writeup and
 figures.
 
@@ -59,3 +58,31 @@ GNN to classify node subjects.
 + dropout (p=0.5) between layers, trained with cross-entropy on the labeled training
 mask. The best checkpoint (by validation accuracy) is saved during training and used for
 the final test-set evaluation.
+
+---
+
+## Repo layout
+
+```
+strategy.py          our completed Section A solution
+gnn.py                our completed Section B solution
+parta/
+  constants.yaml      instructor config (budget, seeds, RF hyperparameters)
+  evaluation.py        instructor evaluation harness (do not modify)
+  run.py                instructor entry point (do not modify) — imports strategy.py
+  utils.py              instructor framework utilities (do not modify) — oracle, data loading
+  strategy_skeleton.py  the blank starter file as given, with TODOs
+partb/
+  evaluation.py, run.py, utils.py   instructor harness, same rules as above
+  gnn_skeleton.py                    the blank starter file as given, with TODOs
+```
+
+To attempt either section yourself: copy `strategy_skeleton.py` → `strategy.py` (or
+`gnn_skeleton.py` → `gnn.py`) into the matching `parta/`/`partb/` folder, fill in the
+TODOs, and run `evaluation.py`.
+
+**Data is not included.** `parta/data/` (employee attrition pool + per-seed splits) and
+`partb/data/` (citation graph nodes/edges/labels) are course-provided datasets and are
+gitignored here — you'll need the course's copy to actually run the harness. Note also
+that `partb/`'s `constants.yaml` (referenced by its `utils.py`) wasn't available in our
+local copy, so it isn't included; you'll need the course's version of that file too.
