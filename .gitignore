@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.zip
+*.log
+*.aux
+nohup.out
+.DS_Store
+.idea/
+.vscode/
+best_model.pt
