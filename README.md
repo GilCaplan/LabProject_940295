@@ -5,6 +5,8 @@ Guy Dukas, Gil Caplan, Murad Rahimli
 
 ## [Video Presentation — Click Here](https://youtu.be/hNOz35dc70M)
 
+Official assignment spec: [`instructions.pdf`](instructions.pdf).
+
 This repo includes the instructor-given assignment harness (config, evaluation script,
 entry point, framework utilities, and the blank starter files) alongside our completed
 solution, so anyone can set it up and attempt the assignment themselves. See
