@@ -8,3 +8,5 @@ nohup.out
 .idea/
 .vscode/
 best_model.pt
+parta/data/
+partb/data/
